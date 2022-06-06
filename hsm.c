@@ -1,10 +1,17 @@
+/**************************************************************************************************
+ * 
+ * 
+ *************************************************************************************************/
 
 
-#include "include/hsm.h"
+#include "hsm.h"
 #include <malloc.h>
 #include <assert.h>
 #include <stdbool.h>
 
+/**************************************************************************************************
+ * 
+ *************************************************************************************************/
 enum
 {
     DIR_UNKNOWN     = -4,
@@ -13,6 +20,9 @@ enum
     DIR_STOP        = -1
 };
 
+/**************************************************************************************************
+ * 
+ *************************************************************************************************/
 struct State
 {
     int parent;
@@ -22,6 +32,9 @@ struct State
     int * p_dir_map;
 };
 
+/**************************************************************************************************
+ * 
+ *************************************************************************************************/
 struct Hsm
 {
     struct State * p_states;
@@ -33,6 +46,9 @@ struct Hsm
     bool structure_is_finalised;
 };
 
+/**************************************************************************************************
+ * 
+ *************************************************************************************************/
 static struct State * alloc_states(int num_states, int num_events)
 {
     struct State * p_states = (struct State *)malloc(sizeof(struct State)*num_states);
@@ -52,32 +68,50 @@ static struct State * alloc_states(int num_states, int num_events)
     return p_states;
 }
 
+/**************************************************************************************************
+ * 
+ *************************************************************************************************/
 static void state_add_child(Hsm_handle hsm, int state, int child)
 {
     struct State * p_state = &hsm->p_states[state];
     p_state->p_children[p_state->num_children++] = child;
 }
 
+/**************************************************************************************************
+ * 
+ *************************************************************************************************/
 static void state_set_parent(Hsm_handle hsm, int state, int parent)
 {
     hsm->p_states[state].parent = parent;
 }
 
+/**************************************************************************************************
+ * 
+ *************************************************************************************************/
 static void state_set_event_handler(Hsm_handle hsm, int state, int event, Event_handler handler)
 {
     hsm->p_states[state].p_event_handlers[event] = handler;
 }
 
+/**************************************************************************************************
+ * 
+ *************************************************************************************************/
 static Event_handler state_get_event_handler(Hsm_handle hsm, int state, int event)
 {
     return hsm->p_states[state].p_event_handlers[event];
 }
 
+/**************************************************************************************************
+ * 
+ *************************************************************************************************/
 static int state_get_parent(Hsm_handle hsm, int state)
 {
     return hsm->p_states[state].parent;
 }
 
+/**************************************************************************************************
+ * 
+ *************************************************************************************************/
 static int dest_below(Hsm_handle hsm, int s, int d)
 {
     for (int c = 0; c < hsm->p_states[s].num_children; c++)
@@ -92,6 +126,9 @@ static int dest_below(Hsm_handle hsm, int s, int d)
     return -1;
 }
 
+/**************************************************************************************************
+ * 
+ *************************************************************************************************/
 static void flatten_handlers(Hsm_handle hsm)
 {
     for (int s = 0; s < hsm->num_states; s++)
@@ -111,6 +148,9 @@ static void flatten_handlers(Hsm_handle hsm)
     }
 }
 
+/**************************************************************************************************
+ * 
+ *************************************************************************************************/
 static void calc_transition_dirs(Hsm_handle hsm)
 {
     /* The root state should have all other states underneath it somewhere in the hierarchy.
@@ -155,6 +195,9 @@ static void calc_transition_dirs(Hsm_handle hsm)
     assert(root_state_found);
 }
 
+/**************************************************************************************************
+ * 
+ *************************************************************************************************/
 static int handle_event(Hsm_handle hsm, int event, void * p_data)
 {
     struct State * p_curr_state = &hsm->p_states[hsm->curr_state];
@@ -170,6 +213,9 @@ static int handle_event(Hsm_handle hsm, int event, void * p_data)
     return new_state;
 }
 
+/**************************************************************************************************
+ * 
+ *************************************************************************************************/
 static void transition_to_state(Hsm_handle hsm, int state)
 {
     int destination_state = state;
@@ -219,8 +265,9 @@ static void transition_to_state(Hsm_handle hsm, int state)
     }
 }
 
-//////////////////////////////////////////////////////////////////////////
-
+/**************************************************************************************************
+ * HSM API functions
+ *************************************************************************************************/
 Hsm_handle hsm_create(int num_states, int num_events)
 {
     Hsm_handle hsm = (Hsm_handle)malloc(sizeof(struct Hsm));
@@ -269,5 +316,3 @@ void hsm_dispatch(Hsm_handle hsm, int event, void * p_data)
         transition_to_state(hsm, new_state);
     }
 }
-
-
