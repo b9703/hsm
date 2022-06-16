@@ -11,7 +11,7 @@ enum Hsm_trans_type
 {
     HSM_TRANS_TYPE_LOCAL,
     HSM_TRANS_TYPE_EXTERNAL,
-    HSM_TRANS_TYPE_UNSPECIFIED
+    HSM_TRANS_TYPE_DEFAULT
 };
 
 struct Hsm_trans
@@ -62,7 +62,7 @@ enum
 /*
  *
  */
-#define HSM_TRANS(s) (struct Hsm_trans){ .target=(s), .type=HSM_TRANS_TYPE_EXTERNAL }
+#define HSM_TRANS(s) (struct Hsm_trans){ .target=(s), .type=HSM_TRANS_TYPE_DEFAULT }
 
 /*
  *
@@ -73,7 +73,7 @@ enum
 /* 
  *
  */
-#define HSM_TRANS_NONE()  (struct Hsm_trans){ .target=HSM_STATE_NULL, .type=HSM_TRANS_TYPE_UNSPECIFIED }
+#define HSM_TRANS_NONE()  (struct Hsm_trans){ .target=HSM_STATE_NULL, .type=HSM_TRANS_TYPE_DEFAULT }
 
 /**************************************************************************************************
  * This is done so that the HSM internals are not visible outside of the HSM implementation file.

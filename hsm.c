@@ -14,7 +14,6 @@
  * Are there an invalid transitions? If theres an init handler can a transition go directly to a
  * substate?
  * 
- * 
  *************************************************************************************************/
 
 /* TODO: 
@@ -23,7 +22,7 @@
  * - Add the option for tracing and profiling e.g. event handling
  * - Add support for event deferral.
  * - Detect malformed state machines.
- * -
+ * - Must a containing state have an init handler? probably.
  *
  * 
  */
@@ -33,8 +32,6 @@
 #include <malloc.h>
 #include <assert.h>
 #include <stdbool.h>
-
-#define TRANS_EQUAL(t1, t2)   (((t1.state) == (t2.state)) && ((t1.type) == (t2.type)))
 
 /**************************************************************************************************
  * 
@@ -71,7 +68,7 @@ struct Hsm
     struct State * p_states;
 
     int num_states;
-    int num_events;
+    int num_user_events;
     int curr_state;
 
     bool structure_is_finalised;
@@ -84,10 +81,128 @@ struct Trans_info
 
 };
 
+struct Event_handler_state_pair
+{
+    Event_handler handler;
+    int source_state;
+};
+
+
 /**************************************************************************************************
  * 
  *************************************************************************************************/
-static struct State * alloc_states(int num_states, int num_events)
+static struct State * alloc_states(int num_states, int num_user_events);
+static void dealloc_states(Hsm_handle hsm);
+static void state_add_child(Hsm_handle hsm, int state, int child);
+static void state_set_parent(Hsm_handle hsm, int state, int parent);
+static void state_set_event_handler(Hsm_handle hsm, int state, int event, Event_handler handler);
+static int state_get_parent(Hsm_handle hsm, int state);
+static int dest_below(Hsm_handle hsm, int s, int d);
+static void calc_transition_dirs(Hsm_handle hsm);
+static struct Event_handler_state_pair get_event_handler(Hsm_handle hsm, int event);
+static void do_entry_action(Hsm_handle hsm);
+static void do_exit_action(Hsm_handle hsm);
+static void do_init_actions(Hsm_handle hsm);
+static void transition_to_state(Hsm_handle hsm, int target);
+static bool is_self_transition(Hsm_handle const hsm, int target);
+static bool is_sub_state_transition(Hsm_handle const hsm, int target);
+static void handle_event(Hsm_handle hsm, int event, void * p_data);
+
+
+/**************************************************************************************************
+ * HSM API functions
+ *************************************************************************************************/
+Hsm_handle hsm_create(int num_states, int num_events)
+{
+    /* TODO: maybe add the option for a custom allocator. 
+     * TODO: handle allocation fail. Maybe assert since this should only be done at init time and
+     *       failure cannot really be recovered from. 
+     * TODO: maybe add the option for a custom assert.
+     */
+    Hsm_handle hsm = (Hsm_handle)malloc(sizeof(struct Hsm));
+
+    hsm->p_states   = alloc_states(num_states, num_events);
+    hsm->num_user_events = num_events;
+    hsm->num_states = num_states;
+    hsm->curr_state = HSM_STATE_ROOT;
+    hsm->structure_is_finalised = false;
+
+    return hsm;
+}
+
+void hsm_destroy(Hsm_handle hsm)
+{
+    dealloc_states(hsm);
+    free(hsm);
+}
+
+void hsm_state_set_event_handler(Hsm_handle hsm, int state, int event, Event_handler handler)
+{
+    assert(!hsm->structure_is_finalised);
+    state_set_event_handler(hsm, state, event, handler);
+}
+
+void hsm_state_set_event_handlers(Hsm_handle hsm,
+                                  struct Hsm_event_handler_pair * p_eh_pairs,
+                                  int num_eh_pairs)
+{
+
+}
+
+void hsm_state_add_child(Hsm_handle hsm, int state, int child)
+{
+    assert(!hsm->structure_is_finalised);
+    state_add_child(hsm, state, child);
+    state_set_parent(hsm, child, state);
+}
+
+void hsm_finalise_structure(Hsm_handle hsm)
+{
+    assert(!hsm->structure_is_finalised);
+
+    calc_transition_dirs(hsm);
+
+    do_init_actions(hsm);
+
+    hsm->structure_is_finalised = true;
+}
+
+void hsm_dispatch(Hsm_handle hsm, int event, void * p_data)
+{
+    assert(hsm->structure_is_finalised);
+    assert(event >= HSM_USER_EVENTS_START);
+
+    handle_event(hsm, event, p_data);
+}
+
+
+void hsm_set_state(Hsm_handle hsm, int state)
+{
+#ifdef HSM_TEST
+    hsm->curr_state = state;
+#else
+    assert(false);
+#endif
+}
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+/**************************************************************************************************
+ * 
+ *************************************************************************************************/
+static struct State * alloc_states(int num_states, int num_user_events)
 {
     struct State * p_states = (struct State *)malloc(sizeof(struct State)*num_states);
 
@@ -96,17 +211,17 @@ static struct State * alloc_states(int num_states, int num_events)
         p_states[i].parent = HSM_STATE_NULL;
         p_states[i].p_children = (int *)malloc(sizeof(int)*num_states);
         p_states[i].num_children = 0;
-        p_states[i].p_user_event_handlers = (Event_handler *)malloc(sizeof(Event_handler)*num_events);
+        p_states[i].p_user_event_handlers = (Event_handler *)malloc(sizeof(Event_handler)*num_user_events);
         p_states[i].p_dir_map     = (int *)malloc(sizeof(int)*num_states);
 
-        for (int j = 0; j < num_events; j++) { p_states[i].p_user_event_handlers [j] = NULL; }
+        for (int j = 0; j < num_user_events; j++) { p_states[i].p_user_event_handlers [j] = NULL; }
         for (int j = 0; j < num_states; j++) { p_states[i].p_children[j] = HSM_STATE_NULL; }
     }
 
     return p_states;
 }
 
-void dealloc_states(Hsm_handle hsm)
+static void dealloc_states(Hsm_handle hsm)
 {
     for (int i = 0; i < hsm->num_states; i++)
     {
@@ -224,247 +339,165 @@ static void calc_transition_dirs(Hsm_handle hsm)
 /**************************************************************************************************
  * 
  *************************************************************************************************/
-static struct Trans_info handle_user_event(Hsm_handle hsm, int event, void * p_data)
+static struct Event_handler_state_pair get_event_handler(Hsm_handle hsm, int event)
 {
+    struct Event_handler_state_pair ehsp = {
+        .handler = NULL,
+        .source_state = HSM_STATE_NULL
+    };
 
-    Event_handler p_handler = NULL;
-
-    int handler_state = hsm->curr_state;
-    while (handler_state != HSM_STATE_NULL) 
-    {
-        Event_handler p_handler = hsm->p_states[handler_state].p_user_event_handlers[event];
-        if (p_handler != NULL)
+    int cs = hsm->curr_state;
+    if (event == HSM_EVENT_STATE_INIT)       { ehsp.handler = hsm->p_states[cs].init_handler;  }
+    else if (event == HSM_EVENT_STATE_ENTRY) { ehsp.handler = hsm->p_states[cs].entry_handler; }
+    else if (event == HSM_EVENT_STATE_EXIT)  { ehsp.handler = hsm->p_states[cs].exit_handler;  }
+    else if (event >= HSM_USER_EVENTS_START) 
+    { 
+        int handler_state = cs;
+        while (handler_state != HSM_STATE_NULL) 
         {
+            ehsp.handler = hsm->p_states[handler_state].p_user_event_handlers[event];
+            if (ehsp.handler != NULL)
+            {
+                ehsp.source_state = handler_state;
+                break;
+            }
+
+            handler_state = state_get_parent(hsm, handler_state);
+        }
+    }
+
+    return ehsp;
+}
+
+static void do_entry_action(Hsm_handle hsm)
+{
+    Event_handler handler = hsm->p_states[hsm->curr_state].entry_handler;
+    if (handler != NULL)
+    {
+        struct Hsm_trans trans = (*handler)(NULL);
+        assert(trans.target == HSM_STATE_NULL);
+    }
+}
+
+static void do_exit_action(Hsm_handle hsm)
+{
+    Event_handler handler = hsm->p_states[hsm->curr_state].exit_handler;
+    if (handler != NULL)
+    {
+        struct Hsm_trans trans = (*handler)(NULL);
+        assert(trans.target == HSM_STATE_NULL);
+    }
+}
+
+static void do_init_actions(Hsm_handle hsm)
+{
+    while (true)
+    {
+        Event_handler handler = hsm->p_states[hsm->curr_state].init_handler;
+        if (handler == NULL)
+        {
+            // TODO: assert in a leaf state.
             break;
         }
 
-        handler_state = state_get_parent(hsm, handler_state);
-    }
-
-
-    struct Trans_info ti = {
-        .trans = HSM_TRANS_NONE(),
-        .trans_source_state = HSM_STATE_NULL
-    };
-
-    // Event was unhandled at all levels so nothing to do.
-    if (p_handler != NULL)
-    {
-        ti.trans = (*p_handler)(p_data),
-        ti.trans_source_state = handler_state;
-    }
-
-    return ti;
-}
-
-static void do_exit_action(Hsm_handle hsm, int state)
-{
-    Event_handler exit_handler = hsm->p_states[state].exit_handler;
-    if (exit_handler != NULL)
-    {
-        struct Hsm_trans trans = (*exit_handler)(NULL);
-        assert(trans.target == HSM_STATE_NULL);
-    }
-
-    
-}
-
-static void do_entry_action(Hsm_handle hsm, int state)
-{
-    Event_handler entry_handler = hsm->p_states[state].entry_handler;
-    if (entry_handler != NULL)
-    {
-        struct Hsm_trans trans = (*entry_handler)(NULL);
-        assert(trans.target == HSM_STATE_NULL);
+        struct Hsm_trans trans = (*handler)(NULL);
+        if (trans.target == HSM_STATE_NULL)
+        {
+            break;
+        }
+        
+        // TODO: assert target is a child of the current state.
+        hsm->curr_state = trans.target;
+        do_entry_action(hsm);
     }
 }
 
-static int do_init_action(Hsm_handle hsm, int state)
+static void transition_to_state(Hsm_handle hsm, int target)
 {
-    Event_handler init_handler = hsm->p_states[state].init_handler;
-    if (init_handler == NULL)
+    while (hsm->curr_state != target)
     {
-        return HSM_STATE_NULL;
+        int dir = hsm->p_states[hsm->curr_state].p_dir_map[target];
+        if (dir >= 0)
+        {
+            hsm->curr_state = hsm->p_states[hsm->curr_state].p_children[dir];
+            do_entry_action(hsm);
+        }
+        else if (dir == DIR_PARENT)
+        {
+            do_exit_action(hsm);
+            hsm->curr_state = hsm->p_states[hsm->curr_state].parent;
+        }
+        else 
+        {
+            assert(false); 
+        }
     }
-
-    struct Hsm_trans trans = (*init_handler)(NULL);
-    assert(trans.target != HSM_STATE_NULL);
-    return trans.target;
 }
 
-static void handle_transition(Hsm_handle hsm, struct Trans_info ti)
+static bool is_self_transition(Hsm_handle const hsm, int target)
 {
-    if (ti.trans.target == HSM_STATE_NULL)
+    return (target == hsm->curr_state);
+   
+}
+
+static bool is_sub_state_transition(Hsm_handle const hsm, int target)
+{
+     int dir = hsm->p_states[hsm->curr_state].p_dir_map[target];
+     return (dir >= 0);
+}
+
+// Change to handle_user_event.
+static void handle_event(Hsm_handle hsm, int event, void * p_data)
+{
+    struct Event_handler_state_pair ehsp = get_event_handler(hsm, event);
+    if (ehsp.handler == NULL)
     {
         return;
     }
 
-    int cs  = hsm->curr_state;
-    int ts  = ti.trans.target;
-
-    /* Firstly, go out to the state that was the origin of the transition. This will either be the
-     * current state, or one of its ancestors.
-     */
-    while (cs != ti.trans_source_state)
+    // Execute the event handler.
+    struct Hsm_trans trans = (*ehsp.handler)(p_data);
+    if (trans.target == HSM_STATE_NULL)
     {
-        do_exit_action(hsm, cs);
-        cs = hsm->p_states[cs].parent;
+        return;
     }
-
-    /* From here, there are a three possibilities:
-     * 1. the target state is the transition source state. In this case the transition is a self
-     *    transition.
-     * 2. the target state is contained by the transition source state. In this case we need to
-     *    know whether the transition is a local one, or an external one. If its a local one then
-     *    we just drill down to the target state. If its an external one then we first need to do
-     *    the exit then entry actions for the transition source state before drilling down to the
-     *    target state.
-     * 3. the target state is not contained by the transition source state. In this case we 
-     *    continue outwards to the LCA of the two states and then drill down to the target state.
-     *    NOTE: this case is not handled by the following if-else, but by the final loop.
-     */
-    int dir = hsm->p_states[cs].p_dir_map[ts];
-    if (cs == ts)
-    {
-        do_exit_action(hsm, cs);
-        do_entry_action(hsm, cs);
-    }
-    else if (dir >= 0)
-    {
-        if (ti.trans.type != HSM_TRANS_TYPE_LOCAL)
-        {
-            do_exit_action(hsm, cs);
-            do_entry_action(hsm, cs);
-        }
-    }
-
-    /* Finally, we do the rest of the transition. 
-     *
-     */
-    while (ts != HSM_STATE_NULL)
-    {
-        if (cs == ts)
-        {
-            ts = do_init_action(hsm, cs);
-        }
-        else
-        {
-            int dir = hsm->p_states[cs].p_dir_map[ts];
-            if (dir >= 0)
-            {
-                cs = hsm->p_states[cs].p_children[dir];
-                do_entry_action(hsm, cs);
-            }
-            else if (dir == DIR_PARENT)
-            {
-                do_exit_action(hsm, cs);
-                cs = hsm->p_states[cs].parent;
-            }
-            else { assert(false); }
-        }
-    }
-
     
-}
-
-/**************************************************************************************************
- * HSM API functions
- *************************************************************************************************/
-Hsm_handle hsm_create(int num_states, int num_events)
-{
-    /* TODO: maybe add the option for a custom allocator. 
-     * TODO: handle allocation fail. Maybe assert since this should only be done at init time and
-     *       failure cannot really be recovered from. 
-     * TODO: maybe add the option for a custom assert.
+    /* If the source of the event handling is not the current state then the event was handled
+     * by one of the current states ancestors. If this is the case then we must first transition
+     * up to that state.
      */
-    Hsm_handle hsm = (Hsm_handle)malloc(sizeof(struct Hsm));
-
-    hsm->p_states   = alloc_states(num_states, num_events);
-    hsm->num_events = num_events;
-    hsm->num_states = num_states;
-    hsm->curr_state = HSM_STATE_ROOT;
-    hsm->structure_is_finalised = false;
-
-    return hsm;
-}
-
-void hsm_destroy(Hsm_handle hsm)
-{
-    dealloc_states(hsm);
-    free(hsm);
-}
-
-void hsm_state_set_event_handler(Hsm_handle hsm, int state, int event, Event_handler handler)
-{
-    assert(!hsm->structure_is_finalised);
-    state_set_event_handler(hsm, state, event, handler);
-}
-
-void hsm_state_set_event_handlers(Hsm_handle hsm,
-                                  struct Hsm_event_handler_pair * p_eh_pairs,
-                                  int num_eh_pairs)
-{
-
-}
-
-void hsm_state_add_child(Hsm_handle hsm, int state, int child)
-{
-    assert(!hsm->structure_is_finalised);
-    state_add_child(hsm, state, child);
-    state_set_parent(hsm, child, state);
-}
-
-void hsm_finalise_structure(Hsm_handle hsm)
-{
-    assert(!hsm->structure_is_finalised);
-
-    calc_transition_dirs(hsm);
-
-    int cs = hsm->curr_state;
-    int ts = do_init_action(hsm, cs);
-    assert(ts != HSM_STATE_NULL);
-    while (ts != HSM_STATE_NULL)
+    if (ehsp.source_state != hsm->curr_state)
     {
-        if (cs == ts)
+        transition_to_state(hsm, ehsp.source_state);
+    }
+
+    // At this point we are at the state that produced the transition (i.e. handled the event)
+    if (is_self_transition(hsm, trans.target))
+    {
+        do_exit_action(hsm);
+        do_entry_action(hsm);
+    }
+    else if (is_sub_state_transition(hsm, trans.target))
+    {
+        if (trans.type == HSM_TRANS_TYPE_EXTERNAL)
         {
-            ts = do_init_action(hsm, cs);
+            do_exit_action(hsm);
+            do_entry_action(hsm);
         }
-        else
+
+        transition_to_state(hsm, trans.target);
+    }
+    else
+    {
+        transition_to_state(hsm, trans.target);
+
+        // TODO: check that its a direct ancestor.
+        if (trans.type == HSM_TRANS_TYPE_EXTERNAL)
         {
-            int dir = hsm->p_states[cs].p_dir_map[ts];
-            if (dir >= 0)
-            {
-                cs = hsm->p_states[cs].p_children[dir];
-                do_entry_action(hsm, cs);
-            }
-            else if (dir == DIR_PARENT)
-            {
-                do_exit_action(hsm, cs);
-                cs = hsm->p_states[cs].parent;
-            }
-            else { assert(false); }
+            do_exit_action(hsm);
+            do_entry_action(hsm);
         }
     }
 
-    hsm->structure_is_finalised = true;
-}
-
-void hsm_dispatch(Hsm_handle hsm, int event, void * p_data)
-{
-    assert(hsm->structure_is_finalised);
-    assert(event >= HSM_USER_EVENTS_START);
-
-    struct Trans_info ti = handle_user_event(hsm, event, p_data);
-
-    handle_transition(hsm, ti);
-}
-
-
-void hsm_set_state(Hsm_handle hsm, int state)
-{
-#ifdef HSM_TEST
-    hsm->curr_state = state;
-#else
-    assert(false);
-#endif
+    do_init_actions(hsm);
 }
