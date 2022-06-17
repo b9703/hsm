@@ -245,6 +245,59 @@ struct Hsm_trans S5_E4(void * p_data)
     return HSM_TRANS_NONE();
 }
 
+struct Hsm_event_handler_pair const SROOT_event_handlers[] = {
+    { HSM_EVENT_STATE_INIT,  &SROOT_init   },
+    { E0,                    &SROOT_E0     },
+    { E1,                    &SROOT_E1     }
+};
+
+struct Hsm_event_handler_pair const S0_event_handlers[] = {
+    { HSM_EVENT_STATE_INIT,  &S0_init   },
+    { HSM_EVENT_STATE_ENTRY, &S0_entry  },
+    { HSM_EVENT_STATE_EXIT,  &S0_exit   }, 
+    { E0,                    &S0_E0     },
+    { E4,                    &S0_E4     }
+};
+
+struct Hsm_event_handler_pair const S1_event_handlers[] = {
+    { HSM_EVENT_STATE_INIT,  &S1_init   },
+    { HSM_EVENT_STATE_ENTRY, &S1_entry  },
+    { HSM_EVENT_STATE_EXIT,  &S1_exit   }, 
+    { E3,                    &S1_E3     },
+    { E4,                    &S1_E4     }
+};
+
+struct Hsm_event_handler_pair const S2_event_handlers[] = {
+    { HSM_EVENT_STATE_ENTRY, &S2_entry  },
+    { HSM_EVENT_STATE_EXIT,  &S2_exit   }, 
+    { E0,                    &S2_E0     },
+    { E2,                    &S2_E2     },
+    { E3,                    &S2_E3     }
+};
+
+struct Hsm_event_handler_pair const S3_event_handlers[] = {
+    { HSM_EVENT_STATE_ENTRY, &S3_entry  },
+    { HSM_EVENT_STATE_EXIT,  &S3_exit   }, 
+    { E2,                    &S3_E2     },
+    { E3,                    &S3_E3     },
+    { E4,                    &S3_E4     }
+};
+
+struct Hsm_event_handler_pair const S4_event_handlers[] = {
+    { HSM_EVENT_STATE_ENTRY, &S4_entry  },
+    { HSM_EVENT_STATE_EXIT,  &S4_exit   }, 
+    { E1,                    &S4_E1     },
+    { E2,                    &S4_E2     },
+    { E4,                    &S4_E4     }
+};
+
+struct Hsm_event_handler_pair const S5_event_handlers[] = {
+    { HSM_EVENT_STATE_ENTRY, &S5_entry  },
+    { HSM_EVENT_STATE_EXIT,  &S5_exit   }, 
+    { E1,                    &S5_E1     },
+    { E3,                    &S5_E3     },
+    { E4,                    &S5_E4     }
+};
 
 int main()
 {
@@ -257,46 +310,14 @@ int main()
     hsm_state_add_child(hsm, S1, S4);
     hsm_state_add_child(hsm, S1, S5);
 
-    hsm_state_set_event_handler(hsm, HSM_STATE_ROOT, HSM_EVENT_STATE_INIT, &SROOT_init);
-    hsm_state_set_event_handler(hsm, HSM_STATE_ROOT, E0, &SROOT_E0);
-    hsm_state_set_event_handler(hsm, HSM_STATE_ROOT, E1, &SROOT_E1);
 
-    hsm_state_set_event_handler(hsm, S0, HSM_EVENT_STATE_INIT, &S0_init);
-    hsm_state_set_event_handler(hsm, S0, HSM_EVENT_STATE_ENTRY, &S0_entry);
-    hsm_state_set_event_handler(hsm, S0, HSM_EVENT_STATE_EXIT,  &S0_exit);
-    hsm_state_set_event_handler(hsm, S0, E0, &S0_E0);
-    hsm_state_set_event_handler(hsm, S0, E4, &S0_E4);
-
-    hsm_state_set_event_handler(hsm, S1, HSM_EVENT_STATE_INIT, &S1_init);
-    hsm_state_set_event_handler(hsm, S1, HSM_EVENT_STATE_ENTRY, &S1_entry);
-    hsm_state_set_event_handler(hsm, S1, HSM_EVENT_STATE_EXIT,  &S1_exit);
-    hsm_state_set_event_handler(hsm, S1, E3, &S1_E3);
-    hsm_state_set_event_handler(hsm, S1, E4, &S1_E4);
-
-    hsm_state_set_event_handler(hsm, S2, HSM_EVENT_STATE_ENTRY, &S2_entry);
-    hsm_state_set_event_handler(hsm, S2, HSM_EVENT_STATE_EXIT, &S2_exit);
-    hsm_state_set_event_handler(hsm, S2, E0, &S2_E0);
-    hsm_state_set_event_handler(hsm, S2, E2, &S2_E2);
-    hsm_state_set_event_handler(hsm, S2, E3, &S2_E3);
-
-    hsm_state_set_event_handler(hsm, S3, HSM_EVENT_STATE_ENTRY, &S3_entry);
-    hsm_state_set_event_handler(hsm, S3, HSM_EVENT_STATE_EXIT,  &S3_exit);
-    hsm_state_set_event_handler(hsm, S3, E2, &S3_E2);
-    hsm_state_set_event_handler(hsm, S3, E3, &S3_E3);
-    hsm_state_set_event_handler(hsm, S3, E4, &S3_E4);
-
-    hsm_state_set_event_handler(hsm, S4, HSM_EVENT_STATE_ENTRY, &S4_entry);
-    hsm_state_set_event_handler(hsm, S4, HSM_EVENT_STATE_EXIT,  &S4_exit);
-    hsm_state_set_event_handler(hsm, S4, E1, &S4_E1);
-    hsm_state_set_event_handler(hsm, S4, E2, &S4_E2);
-    hsm_state_set_event_handler(hsm, S4, E4, &S4_E4);
-
-
-    hsm_state_set_event_handler(hsm, S5, HSM_EVENT_STATE_ENTRY, &S5_entry);
-    hsm_state_set_event_handler(hsm, S5, HSM_EVENT_STATE_EXIT,  &S5_exit);
-    hsm_state_set_event_handler(hsm, S5, E1, &S5_E1);
-    hsm_state_set_event_handler(hsm, S5, E3, &S5_E3);
-    hsm_state_set_event_handler(hsm, S5, E4, &S5_E4);
+    hsm_state_set_event_handler_table(hsm, HSM_STATE_ROOT, SROOT_event_handlers, HANDLER_TABLE_SIZE(SROOT_event_handlers));
+    hsm_state_set_event_handler_table(hsm, S0, S0_event_handlers, HANDLER_TABLE_SIZE(S0_event_handlers));
+    hsm_state_set_event_handler_table(hsm, S1, S1_event_handlers, HANDLER_TABLE_SIZE(S1_event_handlers));
+    hsm_state_set_event_handler_table(hsm, S2, S2_event_handlers, HANDLER_TABLE_SIZE(S2_event_handlers));
+    hsm_state_set_event_handler_table(hsm, S3, S3_event_handlers, HANDLER_TABLE_SIZE(S3_event_handlers));
+    hsm_state_set_event_handler_table(hsm, S4, S4_event_handlers, HANDLER_TABLE_SIZE(S4_event_handlers));
+    hsm_state_set_event_handler_table(hsm, S5, S5_event_handlers, HANDLER_TABLE_SIZE(S5_event_handlers));
 
     hsm_finalise_structure(hsm);
 
