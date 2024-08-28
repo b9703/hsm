@@ -5,37 +5,37 @@
 
 #include <stdint.h>
 #include <stdbool.h>
+#include <stdlib.h>
 
+/*
+ *
+ */
 #ifndef HSM_MAX_NUM_SUBSTATES   
 #define HSM_MAX_NUM_SUBSTATES   16
 #endif
 
-#define HSM_STATE_NULL    (struct Hsm_state *)NULL
-
+/*
+ *
+ */
+#ifndef MAX_HSM_DEPTH   
+#define MAX_HSM_DEPTH   8
+#endif
 
 typedef int32_t Hsm_event_type;
 
-enum Hsm_ret
-{
-    HSM_RET_UNDERWAY,
-    HSM_RET_FINISHED,
-};
+// TODO: consider representing the final state differently.
+#define HSM_STATE_NULL    (struct Hsm_state *)NULL
+#define HSM_STATE_FINAL   (struct Hsm_state *)1;
 
-enum Hsm_transition_type
-{
-    HSM_TRANSITION_TYPE_DEFAULT,
-    HSM_TRANSITION_TYPE_LOCAL,
-    HSM_TRANSITION_TYPE_EXTERNAL,
-};
+/*
+ *
+ */
+#define HSM_EVENT_TYPE_STATE_ENTRY  ((Hsm_event_type)-2)
+#define HSM_EVENT_TYPE_STATE_EXIT   ((Hsm_event_type)-1)
+#define HSM_USER_EVENT_TYPES_START  ((Hsm_event_type)0)
 
-struct Hsm_transition
-{
-    struct Hsm_state * p_target;
-    enum Hsm_transition_type type;
-};
-
-#define HSM_TRANS_DEFAULT()     { .p_target = HSM_STATE_NULL, .type = HSM_TRANSITION_TYPE_DEFAULT }
-
+typedef void (*Hsm_logging_callback)(char const * log_string);
+typedef void (*Hsm_assert_callback)();
 
 struct Hsm_meta_settings
 {
@@ -43,14 +43,73 @@ struct Hsm_meta_settings
     Hsm_assert_callback assert_callback;
 };
 
-enum Hsm_handling_status 
+enum Hsm_ret
 {
+    HSM_RET_UNDERWAY,
+    HSM_RET_FINISHED,
 };
 
+enum Hsm_handling_ret
+{
+    // Event was unhandled (so it will be passed to its super-state).
+    HSM_HANDLING_RET_UNHANDLED,
 
+    // Event was handled but no transition resulted (HSM stays in the same state).
+    HSM_HANDLING_RET_HANDLED_NO_TRANSITION,
+
+    // Event was handled and a transition was requested.
+    HSM_HANDLING_RET_HANDLED_WITH_TRANSITION
+};
+
+struct Hsm_handling
+{
+    /* If ret == HSM_HANDLING_RET_HANDLED_WITH_TRANSITION then the p_target member is used to 
+     * specify the target state for the tranisition, otherwise p_target is ignored.
+     * 
+     */
+    enum Hsm_handling_ret ret;
+    struct Hsm_state * p_target;
+};
+
+/* Macros for using in state event handlers. For example...
+ * struct Hsm_handling handling = HSM_EVENT_HANDLED();
+ * switch (p_event->type)
+ * {
+ *     case MY_EVENT_TYPE_1:
+ *         <event handling code that does not produce a state transition>
+ *         break;
+ *     
+ *     case MY_EVENT_TYPE_2:
+ *         handling = HSM_TRANSITION(&some_state);
+ *         break;
+ * 
+ *     default:
+ *         handling = HSM_EVENT_UNHANDLED()
+ * }
+ *
+ */
+#define HSM_EVENT_UNHANDLED()  { .ret = HSM_HANDLING_RET_UNHANDLED,               .p_target = HSM_STATE_NULL }
+#define HSM_EVENT_HANDLED()    { .ret = HSM_HANDLING_RET_HANDLED_NO_TRANSITION,   .p_target = HSM_STATE_NULL }
+#define HSM_TRANSITION(state)  { .ret = HSM_HANDLING_RET_HANDLED_WITH_TRANSITION, .p_target = (state)        }
+
+#define HSM_EVENT_CAST(p_event)     ((struct Hsm_event *)p_event)
+
+/* The base 'class' for HSM events. You can implement custom events by embedding a Hsm_event as the
+ * first member of the event. For example...
+ * struct My_custom_event
+ * {
+ *     struct Hsm_event base;
+ *     int my_data;
+ * };
+ * 
+ * then when an event pointer is passed to the HSM it should be downcast to a pointer of the 
+ * Hsm_event base class e.g. hsm_handle_event(&my_hsm, HSM_EVENT_CAST(&my_custom_event)).
+ * The event handlers can then retrieve the data by looking at the event type and casting
+ * the event pointer back to the custom events type.
+ */
 struct Hsm_event
 {
-   Hsm_event_type type;  
+    Hsm_event_type type;  
 };
 
 struct Hsm_state
@@ -63,10 +122,8 @@ struct Hsm_state
     struct Hsm_state const * p_substates[HSM_MAX_NUM_SUBSTATES+1];
 };
 
-typedef struct Hsm_state * (*Hsm_event_handler)(void * p_context, struct Hsm_event const * p_event);
+typedef struct Hsm_handling (*Hsm_event_handler)(void * p_context, struct Hsm_event const * p_event);
 
-typedef void (*Hsm_logging_callback)(char const * log_string);
-typedef void (*Hsm_assert_callback)();
 
 struct Hsm
 {
