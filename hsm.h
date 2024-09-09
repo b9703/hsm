@@ -27,11 +27,12 @@ typedef int32_t Hsm_event_type;
 #define HSM_STATE_NULL    (struct Hsm_state *)NULL
 #define HSM_STATE_FINAL   (struct Hsm_state *)1;
 
-/*
+/* Event type 
  *
  */
-#define HSM_EVENT_TYPE_STATE_ENTRY  ((Hsm_event_type)-2)
-#define HSM_EVENT_TYPE_STATE_EXIT   ((Hsm_event_type)-1)
+#define HSM_EVENT_TYPE_STATE_ENTRY  ((Hsm_event_type)-3)
+#define HSM_EVENT_TYPE_STATE_EXIT   ((Hsm_event_type)-2)
+#define HSM_EVENT_TYPE_STATE_INIT   ((Hsm_event_type)-1)
 #define HSM_USER_EVENT_TYPES_START  ((Hsm_event_type)0)
 
 typedef void (*Hsm_logging_callback)(char const * log_string);
@@ -61,6 +62,14 @@ enum Hsm_handling_ret
     HSM_HANDLING_RET_HANDLED_WITH_TRANSITION
 };
 
+enum Hsm_transition_type
+{
+    HSM_TRANSITION_TYPE_DEFAULT,
+    HSM_TRANSITION_TYPE_EXTERNAL,
+    HSM_TRANSITION_TYPE_LOCAL,
+    HSM_TRANSITION_TYPE_NONE,
+}
+
 struct Hsm_handling
 {
     /* If ret == HSM_HANDLING_RET_HANDLED_WITH_TRANSITION then the p_target member is used to 
@@ -69,6 +78,7 @@ struct Hsm_handling
      */
     enum Hsm_handling_ret ret;
     struct Hsm_state * p_target;
+    enum Hsm_transition_type transition_type;
 };
 
 /* Macros for using in state event handlers. For example...
@@ -88,9 +98,11 @@ struct Hsm_handling
  * }
  *
  */
-#define HSM_EVENT_UNHANDLED()  { .ret = HSM_HANDLING_RET_UNHANDLED,               .p_target = HSM_STATE_NULL }
-#define HSM_EVENT_HANDLED()    { .ret = HSM_HANDLING_RET_HANDLED_NO_TRANSITION,   .p_target = HSM_STATE_NULL }
-#define HSM_TRANSITION(state)  { .ret = HSM_HANDLING_RET_HANDLED_WITH_TRANSITION, .p_target = (state)        }
+#define HSM_EVENT_UNHANDLED()          { .ret = HSM_HANDLING_RET_UNHANDLED,               .p_target = HSM_STATE_NULL, .transition_type = HSM_TRANSITION_TYPE_NONE     }
+#define HSM_EVENT_HANDLED()            { .ret = HSM_HANDLING_RET_HANDLED_NO_TRANSITION,   .p_target = HSM_STATE_NULL, .transition_type = HSM_TRANSITION_TYPE_NONE     }
+#define HSM_TRANSITION(state)          { .ret = HSM_HANDLING_RET_HANDLED_WITH_TRANSITION, .p_target = (&state),       .transition_type = HSM_TRANSITION_TYPE_DEFAULT  }
+#define HSM_TRANSITION_LOCAL(state)    { .ret = HSM_HANDLING_RET_HANDLED_WITH_TRANSITION, .p_target = (&state),       .transition_type = HSM_TRANSITION_TYPE_LOCAL    }
+#define HSM_TRANSITION_EXTERNAL(state) { .ret = HSM_HANDLING_RET_HANDLED_WITH_TRANSITION, .p_target = (&state),       .transition_type = HSM_TRANSITION_TYPE_EXTERNAL }
 
 #define HSM_EVENT_CAST(p_event)     ((struct Hsm_event *)p_event)
 
@@ -122,15 +134,19 @@ struct Hsm_state
     struct Hsm_state const * p_substates[HSM_MAX_NUM_SUBSTATES+1];
 };
 
-typedef struct Hsm_handling (*Hsm_event_handler)(void * p_context, struct Hsm_event const * p_event);
+typedef struct Hsm_handling (*Hsm_event_handler)(struct Hsm_event const * p_event, void * p_context);
 
 
 struct Hsm
 {
     char const * name;
     struct Hsm_state const * p_root_state;
-    Hsm_event_handler const start_handler;
+
+    /* The handler that gets called when enter the 'final' pseudo state. It is essentially
+     * 
+     */
     Hsm_event_handler const final_handler;
+    
     void * p_context;    
 
     // Internal member variables (not to be modified by application code).    
