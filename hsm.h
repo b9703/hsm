@@ -7,34 +7,35 @@
 #include <stdbool.h>
 #include <stdlib.h>
 
-/*
- *
- */
-#ifndef HSM_MAX_NUM_SUBSTATES   
-#define HSM_MAX_NUM_SUBSTATES   16
+#ifndef HSM_MAX_NUM_IMMEDIATE_SUBSTATES_PER_STATE   
+#define HSM_MAX_NUM_IMMEDIATE_SUBSTATES_PER_STATE   16
 #endif
 
-/*
- *
- */
-#ifndef MAX_HSM_DEPTH   
-#define MAX_HSM_DEPTH   8
+#ifndef HSM_MAX_DEPTH   
+#define HSM_MAX_DEPTH   8
+#endif
+
+#ifndef HSM_MAX_NAME_LENGTH      
+#define HSM_MAX_NAME_LENGTH   32
 #endif
 
 typedef int32_t Hsm_event_type;
 
 // TODO: consider representing the final state differently.
 #define HSM_STATE_NULL    (struct Hsm_state *)NULL
-#define HSM_STATE_FINAL   (struct Hsm_state *)1;
+#define HSM_STATE_FINAL   (struct Hsm_state *)1
 
-/* Event type 
- *
- */
+// Special event types
 #define HSM_EVENT_TYPE_STATE_ENTRY  ((Hsm_event_type)-3)
 #define HSM_EVENT_TYPE_STATE_EXIT   ((Hsm_event_type)-2)
 #define HSM_EVENT_TYPE_STATE_INIT   ((Hsm_event_type)-1)
+
+// Where user-defined event types must start from.
 #define HSM_USER_EVENT_TYPES_START  ((Hsm_event_type)0)
 
+/*
+ *
+ */
 typedef void (*Hsm_logging_callback)(char const * log_string);
 typedef void (*Hsm_assert_callback)();
 
@@ -47,18 +48,13 @@ struct Hsm_meta_settings
 enum Hsm_ret
 {
     HSM_RET_UNDERWAY,
-    HSM_RET_FINISHED,
+    HSM_RET_REACHED_FINAL_STATE,
 };
 
 enum Hsm_handling_ret
 {
-    // Event was unhandled (so it will be passed to its super-state).
     HSM_HANDLING_RET_UNHANDLED,
-
-    // Event was handled but no transition resulted (HSM stays in the same state).
     HSM_HANDLING_RET_HANDLED_NO_TRANSITION,
-
-    // Event was handled and a transition was requested.
     HSM_HANDLING_RET_HANDLED_WITH_TRANSITION
 };
 
@@ -68,17 +64,19 @@ enum Hsm_transition_type
     HSM_TRANSITION_TYPE_EXTERNAL,
     HSM_TRANSITION_TYPE_LOCAL,
     HSM_TRANSITION_TYPE_NONE,
-}
+};
+
+struct Hsm_transition
+{
+    enum Hsm_transition_type type;
+    struct Hsm_type const * p_target;
+};
 
 struct Hsm_handling
 {
-    /* If ret == HSM_HANDLING_RET_HANDLED_WITH_TRANSITION then the p_target member is used to 
-     * specify the target state for the tranisition, otherwise p_target is ignored.
-     * 
-     */
+    // transition is only valid if ret indicates that a transition should occur.
     enum Hsm_handling_ret ret;
-    struct Hsm_state * p_target;
-    enum Hsm_transition_type transition_type;
+    struct Hsm_transition transition;
 };
 
 /* Macros for using in state event handlers. For example...
@@ -93,8 +91,11 @@ struct Hsm_handling
  *         handling = HSM_TRANSITION(&some_state);
  *         break;
  * 
+ *     case MY_EVENT_TYPE_3:
+ *         handling = HSM_TRANSITION_EXTERNAL(&some_super_state);
+ * 
  *     default:
- *         handling = HSM_EVENT_UNHANDLED()
+ *         handling = HSM_EVENT_UNHANDLED();
  * }
  *
  */
@@ -104,7 +105,6 @@ struct Hsm_handling
 #define HSM_TRANSITION_LOCAL(state)    { .ret = HSM_HANDLING_RET_HANDLED_WITH_TRANSITION, .p_target = (&state),       .transition_type = HSM_TRANSITION_TYPE_LOCAL    }
 #define HSM_TRANSITION_EXTERNAL(state) { .ret = HSM_HANDLING_RET_HANDLED_WITH_TRANSITION, .p_target = (&state),       .transition_type = HSM_TRANSITION_TYPE_EXTERNAL }
 
-#define HSM_EVENT_CAST(p_event)     ((struct Hsm_event *)p_event)
 
 /* The base 'class' for HSM events. You can implement custom events by embedding a Hsm_event as the
  * first member of the event. For example...
@@ -117,29 +117,55 @@ struct Hsm_handling
  * then when an event pointer is passed to the HSM it should be downcast to a pointer of the 
  * Hsm_event base class e.g. hsm_handle_event(&my_hsm, HSM_EVENT_CAST(&my_custom_event)).
  * The event handlers can then retrieve the data by looking at the event type and casting
- * the event pointer back to the custom events type.
+ * the event pointer back to the custom events type. For example...
+ * switch (p_event->type)
+ * {
+ *     case EVENT_BUTTON_PRESS:
+ *     {
+ *         struct Event_button_press * p_ev = (struct Event_button_press *)p_event;
+ *         if (p_ev->button_id) { ... }
+ *     }
+ * }
  */
 struct Hsm_event
 {
     Hsm_event_type type;  
 };
 
+// Used to cast an Hsm_event derived class pointer back to the base class.
+#define HSM_EVENT_CAST(p_event)     ((struct Hsm_event *)p_event)
+
+/*
+ *
+ */
 struct Hsm_state
 {
-    char const * name;
+    // Only important for logging, if enabled.
+    char name[HSM_MAX_NAME_LENGTH];
+     
     Hsm_event_handler const handle_event;    
+
     struct Hsm_state const * p_super;
 
     // Null-terminated array of substates.
-    struct Hsm_state const * p_substates[HSM_MAX_NUM_SUBSTATES+1];
+    struct Hsm_state const * p_substates[HSM_MAX_NUM_IMMEDIATE_SUBSTATES_PER_STATE+1];
 };
 
+// State event handler prototype.
 typedef struct Hsm_handling (*Hsm_event_handler)(struct Hsm_event const * p_event, void * p_context);
 
-
+/*
+ *
+ *
+ */
 struct Hsm
 {
-    char const * name;
+    // Only important for logging, if enabled.
+    char name[HSM_MAX_NAME_LENGTH];
+
+    /* All HSMs must have a root state that contains all other states. 
+     * 
+     */
     struct Hsm_state const * p_root_state;
 
     /* The handler that gets called when enter the 'final' pseudo state. It is essentially
@@ -155,17 +181,20 @@ struct Hsm
 };
 
 /**************************************************************************************************
- *
+ * Starts the HSM, causing it to perform its initial transition i.e. pass an init state event to 
+ * the root state.
  *************************************************************************************************/
 void hsm_start(struct Hsm * p_hsm);
 
 /**************************************************************************************************
- *
+ * Gives an event to the HSM for handling. The HSM must have been started. If the HSM has already
+ * reached its final state then no event handling will be done (and a corresponding return code
+ * will indicate this).
  *************************************************************************************************/
 enum Hsm_ret hsm_handle_event(struct Hsm * p_hsm, struct Hsm_event const * p_event);
 
 /**************************************************************************************************
- *
+ * Aborts the state machine operation immediately.
  *************************************************************************************************/
 void hsm_abort(struct Hsm * p_hsm);
 

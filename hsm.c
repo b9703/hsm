@@ -127,7 +127,7 @@ static struct Hsm_state * do_state_init_handling(struct Hsm * p_hsm, struct Hsm_
         else if (handling.ret == HSM_HANDLING_RET_HANDLED_WITH_TRANSITION)
         {
             HSM_ASSERT((p_curr == handling.p_target->p_super));
-            p_curr = handling.p_target;
+            p_curr = handling.transition.p_target;
         }
         else
         {
@@ -145,8 +145,8 @@ static struct Hsm_state * do_state_init_handling(struct Hsm * p_hsm, struct Hsm_
  * who's handler actually triggered the transition. It must be the current state, or an ancestor
  * of it. 
  *************************************************************************************************/
-static void hsm_transition_state(struct Hsm * p_hsm, 
-                                 struct Hsm_state const * p_target,
+static void transition_state(struct Hsm * p_hsm, 
+                                 struct Hsm_transition const * p_transition,
                                  struct Hsm_state const * p_handler_state)
 {
     // Do exit action up to (but not including) the state that triggered the transition.
@@ -160,7 +160,7 @@ static void hsm_transition_state(struct Hsm * p_hsm,
     struct Path curr_path_to_root;
     struct Path target_path_to_root;
     get_path_to_root(&curr_path_to_root, p_curr);
-    get_path_to_root(&target_path_to_root, p_target);
+    get_path_to_root(&target_path_to_root, p_transition->p_target);
     
     /* The least-common-ancestor (LCA) of the curr and target states is the point where the paths 
      * up to the root state insersect.
@@ -178,8 +178,7 @@ static void hsm_transition_state(struct Hsm * p_hsm,
     struct Hsm_state const * p_lca = curr_path_to_root.nodes[lca_index_in_curr_path];
     if (p_curr == p_lca)
     {
-        // TODO: pass a Hsm_transition struct into this function which includes the transition type.
-        if (false)
+        if (p_transition->type == HSM_TRANSITION_TYPE_EXTERNAL)
         {
             do_state_exit_actions(p_hsm, p_curr);
             do_state_entry_actions(p_hsm, p_curr);
@@ -226,14 +225,17 @@ static void handle_event(struct Hsm * p_hsm,
     }
     
     *p_handling = handling;
-    *p_handler_state = p_curr
+    *p_handler_state = p_curr;
 }
+
+/**************************************************************************************************
+ * HSM API function implementations
+ *************************************************************************************************/
 
 void hsm_start(struct Hsm * p_hsm)
 {
+    do_state_init_handling(p_hsm, p_hsm->p_root_state);
 }
-
-
 
 enum Hsm_ret hsm_handle_event(struct Hsm * p_hsm, struct Hsm_event const * p_event)
 {
@@ -244,22 +246,13 @@ enum Hsm_ret hsm_handle_event(struct Hsm * p_hsm, struct Hsm_event const * p_eve
     struct Hsm_handling handling;
     struct Hsm_state * p_handler_state;
     handle_event(p_hsm, p_event, &handling, &p_handler_state);
-
-    switch (handling.ret)
+    if (handling.ret == HSM_HANDLING_RET_HANDLED_WITH_TRANSITION)
     {
-        case HSM_HANDLING_RET_HANDLED_WITH_TRANSITION:
-            
-            break;
-
-        case HSM_HANDLING_RET_UNHANDLED:
-        case HSM_HANDLING_RET_HANDLED_NO_TRANSITION:
-            break;
-
-        default:
-            break;
+        transition_state(p_hsm, &handling.transition, p_handler_state); 
     }
 
-
+    return (p_hsm->p_curr_state == HSM_STATE_FINAL) ? HSM_RET_REACHED_FINAL_STATE
+                                                    : HSM_RET_UNDERWAY;
 }
 
 void hsm_abort(struct Hsm * p_hsm)
